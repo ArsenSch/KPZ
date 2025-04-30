@@ -1,0 +1,83 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from binance import Client
+from datetime import datetime, timedelta
+
+
+def fetch_price_data(asset: str, start_time: datetime, end_time: datetime) -> pd.DataFrame:
+    """Fetch historical price data from Binance API."""
+    client = Client()
+    klines = client.get_historical_klines(
+        asset,
+        Client.KLINE_INTERVAL_1MINUTE,
+        start_time.strftime("%Y-%m-%d %H:%M:%S"),
+        end_time.strftime("%Y-%m-%d %H:%M:%S")
+    )
+    
+    columns = [
+        'time', 'open', 'high', 'low', 'close', 'volume',
+        'close_time', 'quote_asset_volume', 'trades',
+        'taker_buy_base', 'taker_buy_quote', 'ignore'
+    ]
+    
+    df = pd.DataFrame(klines, columns=columns)
+    df['time'] = pd.to_datetime(df['time'], unit='ms')
+    df['close'] = df['close'].astype(float)
+    
+    return df[['time', 'open', 'close']]
+
+
+def calculate_rsi_values(df: pd.DataFrame, periods: list) -> pd.DataFrame:
+    """Calculate RSI values for given periods."""
+    for period in periods:
+        delta = df['close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+        loss = -delta.where(delta < 0, 0).rolling(window=period).mean()
+        loss.replace(0, float('nan'), inplace=True)
+        
+        rs = gain / loss
+        df[f'RSI_{period}'] = 100 - (100 / (1 + rs))
+    
+    return df
+
+
+def calculate_rsi(asset: str, periods: list) -> pd.DataFrame:
+    """Main function to fetch data and calculate RSI."""
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(days=1)
+    
+    df = fetch_price_data(asset, start_time, end_time)
+    df = calculate_rsi_values(df, periods)
+    
+    return df
+
+
+def plot_rsi_data(rsi_data: pd.DataFrame, periods: list) -> None:
+    """Plot RSI data using different graph types."""
+    graph_types = ['plot', 'scatter', 'bar']
+    
+    fig, axs = plt.subplots(len(periods), 1, figsize=(12, 10), sharex=True)
+    
+    for period, ax, graph_type in zip(periods, axs, graph_types):
+        if graph_type == 'plot':
+            ax.plot(rsi_data['time'], rsi_data[f'RSI_{period}'])
+        elif graph_type == 'scatter':
+            ax.scatter(rsi_data['time'], rsi_data[f'RSI_{period}'], s=5)
+        elif graph_type == 'bar':
+            ax.bar(rsi_data['time'], rsi_data[f'RSI_{period}'], width=0.001)
+        
+        ax.set_title(f'{graph_type} - RSI {period}')
+        ax.set_ylabel('RSI')
+    
+    axs[-1].set_xlabel('Time')
+    plt.tight_layout()
+    plt.savefig('SCH6Res.png')
+    plt.show()
+
+
+if __name__ == "__main__":
+    asset = "BTCUSDT"
+    periods = [14, 27, 100]
+    
+    rsi_data = calculate_rsi(asset, periods)
+    plot_rsi_data(rsi_data, periods)
