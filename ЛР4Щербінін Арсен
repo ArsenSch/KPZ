@@ -1,0 +1,53 @@
+import pandas as pd
+from binance import Client
+from datetime import datetime, timedelta
+
+
+def get_klines_data(asset: str, days_back: int = 1) -> pd.DataFrame:
+    """Fetch historical klines data from Binance API."""
+    client = Client()
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(days=days_back)
+    
+    klines = client.get_historical_klines(
+        symbol=asset,
+        interval=Client.KLINE_INTERVAL_1MINUTE,
+        start_str=start_time.strftime("%Y-%m-%d"),
+        end_str=end_time.strftime("%Y-%m-%d")
+    )
+    
+    columns = [
+        'time', 'open', 'high', 'low', 'close', 'volume',
+        'close_time', 'quote_volume', 'trades',
+        'taker_buy_base', 'taker_buy_quote', 'ignore'
+    ]
+    
+    df = pd.DataFrame(klines, columns=columns)
+    df['time'] = pd.to_datetime(df['time'], unit='ms')
+    df['close'] = df['close'].astype(float)
+    
+    return df[['time', 'open', 'close']]
+
+
+def calculate_single_rsi(series: pd.Series, period: int) -> pd.Series:
+    """Calculate RSI for a single period."""
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0).rolling(period).mean()
+    loss = -delta.where(delta < 0, 0).rolling(period).mean()
+    rs = gain / loss.replace(0, float('nan'))
+    return 100 - (100 / (1 + rs))
+
+
+def calculate_rsi(asset: str, periods: list) -> pd.DataFrame:
+    """Main function to calculate RSI for multiple periods."""
+    df = get_klines_data(asset)
+    
+    for period in periods:
+        df[f'RSI_{period}'] = calculate_single_rsi(df['close'], period)
+    
+    return df
+
+
+if __name__ == "__main__":
+    data = calculate_rsi("BTCUSDT", [14, 27, 100])
+    print(data)
