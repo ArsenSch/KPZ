@@ -1,0 +1,140 @@
+import pandas as pd
+import numpy as np
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import time
+from typing import Optional
+
+
+@dataclass
+class TradingSignal:
+    """Dataclass to store trading signal information."""
+    time: datetime
+    asset: str
+    quantity: float
+    side: str
+    entry: float
+    take_profit: float
+    stop_loss: float
+    result: str = "Proceed"
+
+
+class TradingStrategy:
+    """Class implementing a trading strategy with technical indicators."""
+    
+    def __init__(self, asset: str, quantity: float = 1.0):
+        """Initialize strategy with asset and default quantity."""
+        self.asset = asset
+        self.quantity = quantity
+    
+    def generate_mock_market_data(self) -> pd.DataFrame:
+        """Generate mock market data for testing purposes."""
+        end_time = datetime.now()
+        start_time = end_time - timedelta(minutes=99)
+        
+        times = pd.date_range(start_time, periods=100, freq='min')
+        base_prices = np.cumsum(np.random.normal(0, 0.5, size=100)) + 100
+        
+        return pd.DataFrame({
+            'time': times,
+            'close': base_prices,
+            'high': base_prices + np.random.rand(100),
+            'low': base_prices - np.random.rand(100),
+            'open': base_prices + np.random.uniform(-1, 1, size=100)
+        })
+    
+    def compute_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate various technical indicators for the given DataFrame."""
+        # EMA (Exponential Moving Average)
+        df['EMA_14'] = df['close'].ewm(span=14).mean()
+        
+        # RSI (Relative Strength Index)
+        price_diff = df['close'].diff()
+        gain = price_diff.where(price_diff > 0, 0).rolling(window=14).mean()
+        loss = -price_diff.where(price_diff < 0, 0).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+        
+        # ATR (Average True Range) and ADX (Average Directional Index)
+        high, low, close = df['high'], df['low'], df['close']
+        prev_close = close.shift()
+        
+        df['TR'] = np.maximum(
+            high - low,
+            np.maximum(abs(high - prev_close), abs(low - prev_close))
+        df['ATR'] = df['TR'].rolling(window=14).mean()
+        
+        df['+DM'] = np.where(
+            (high - high.shift()) > (low.shift() - low), 
+            high - high.shift(), 0)
+        df['-DM'] = np.where(
+            (low.shift() - low) > (high - high.shift()), 
+            low.shift() - low, 0)
+        
+        df['+DI'] = 100 * (df['+DM'].rolling(window=14).mean() / df['ATR'])
+        df['-DI'] = 100 * (df['-DM'].rolling(window=14).mean() / df['ATR'])
+        df['ADX'] = abs(df['+DI'] - df['-DI']) / (df['+DI'] + df['-DI']) * 100
+        
+        return df
+    
+    def generate_trading_signal(self, df: pd.DataFrame) -> Optional[TradingSignal]:
+        """Generate trading signal based on technical indicators."""
+        df = self.compute_technical_indicators(df)
+        latest = df.iloc[-1]
+        
+        price = latest['close']
+        rsi = latest['RSI']
+        adx = latest['ADX']
+        ema = latest['EMA_14']
+        
+        # Determine trade direction based on conditions
+        if rsi > 70 and price > ema:
+            side = "SELL"
+        elif rsi < 30 and price < ema:
+            side = "BUY"
+        else:
+            return None
+        
+        # Only proceed if trend is strong (ADX > 35)
+        if adx > 35:
+            if side == "BUY":
+                take_profit = round(price * 1.05, 2)
+                stop_loss = round(price * 0.98, 2)
+            else:  # SELL
+                take_profit = round(price * 0.95, 2)
+                stop_loss = round(price * 1.02, 2)
+            
+            return TradingSignal(
+                time=datetime.now(),
+                asset=self.asset,
+                quantity=self.quantity,
+                side=side,
+                entry=price,
+                take_profit=take_profit,
+                stop_loss=stop_loss
+            )
+        
+        return None
+
+
+def run_strategy_monitor(strategy: TradingStrategy, interval: int = 5):
+    """Continuously monitor the market and generate signals."""
+    while True:
+        market_data = strategy.generate_mock_market_data()
+        signal = strategy.generate_trading_signal(market_data)
+        
+        current_time = datetime.now()
+        
+        if signal:
+            print(f"[{signal.time}] SIGNAL: {signal.side} {signal.asset} @ {signal.entry}")
+            print(f"  TP: {signal.take_profit}, SL: {signal.stop_loss}")
+        else:
+            print(f"[{current_time}] No signal detected.")
+        
+        time.sleep(interval)
+
+
+if __name__ == "__main__":
+    # Initialize and run the strategy
+    trading_strategy = TradingStrategy("SCH8ResCoinStyle", quantity=1.0)
+    run_strategy_monitor(trading_strategy)
