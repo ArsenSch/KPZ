@@ -1,0 +1,186 @@
+import pandas as pd
+import numpy as np
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import time
+from typing import Optional
+
+
+@dataclass
+class Signal:
+    """Represents a trading signal with all necessary parameters."""
+    time: datetime
+    asset: str
+    quantity: float
+    side: str
+    entry: float
+    take_profit: float
+    stop_loss: float
+    result: str = "Proceed"
+
+
+class TechnicalIndicators:
+    """Handles calculation of technical indicators."""
+    
+    @staticmethod
+    def calculate_ema(series: pd.Series, window: int = 14) -> pd.Series:
+        """Calculate Exponential Moving Average."""
+        return series.ewm(span=window, adjust=False).mean()
+    
+    @staticmethod
+    def calculate_rsi(close_prices: pd.Series, window: int = 14) -> pd.Series:
+        """Calculate Relative Strength Index."""
+        delta = close_prices.diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        
+        avg_gain = gain.rolling(window=window).mean()
+        avg_loss = loss.rolling(window=window).mean()
+        
+        rs = avg_gain / avg_loss.replace(0, float('nan'))
+        return 100 - (100 / (1 + rs))
+    
+    @staticmethod
+    def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
+        """Calculate Average True Range."""
+        tr1 = high - low
+        tr2 = (high - close.shift()).abs()
+        tr3 = (low - close.shift()).abs()
+        
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return true_range.rolling(window=window).mean()
+    
+    @staticmethod
+    def calculate_directional_indicators(
+        high: pd.Series,
+        low: pd.Series,
+        atr: pd.Series,
+        window: int = 14
+    ) -> tuple[pd.Series, pd.Series, pd.Series]:
+        """Calculate +DI, -DI, and ADX."""
+        up_move = high - high.shift()
+        down_move = low.shift() - low
+        
+        plus_dm = np.where(up_move > down_move, np.maximum(up_move, 0), 0)
+        minus_dm = np.where(down_move > up_move, np.maximum(down_move, 0), 0)
+        
+        plus_di = 100 * (plus_dm.rolling(window=window).mean() / atr)
+        minus_di = 100 * (minus_dm.rolling(window=window).mean() / atr)
+        
+        dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+        adx = dx.rolling(window=window).mean()
+        
+        return plus_di, minus_di, adx
+
+
+class DataGenerator:
+    """Generates synthetic market data for testing."""
+    
+    @staticmethod
+    def generate_fake_data(
+        periods: int = 100,
+        base_price: float = 100,
+        volatility: float = 0.5
+    ) -> pd.DataFrame:
+        """Generate synthetic OHLC market data."""
+        times = pd.date_range(
+            start=datetime.now() - timedelta(minutes=periods-1),
+            periods=periods,
+            freq='min'
+        )
+        
+        price_changes = np.random.normal(0, volatility, size=periods)
+        close_prices = np.cumsum(price_changes) + base_price
+        
+        return pd.DataFrame({
+            'time': times,
+            'open': close_prices + np.random.uniform(-1, 1, size=periods),
+            'high': close_prices + np.random.rand(periods),
+            'low': close_prices - np.random.rand(periods),
+            'close': close_prices
+        })
+
+
+class TradingStrategy:
+    """Implements the trading strategy logic."""
+    
+    def __init__(self, asset: str, quantity: float = 1.0):
+        self.asset = asset
+        self.quantity = quantity
+        self.indicators = TechnicalIndicators()
+    
+    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate all technical indicators for the given DataFrame."""
+        df = df.copy()
+        
+        df['EMA_14'] = self.indicators.calculate_ema(df['close'])
+        
+        df['RSI'] = self.indicators.calculate_rsi(df['close'])
+        
+        df['ATR'] = self.indicators.calculate_atr(df['high'], df['low'], df['close'])
+        
+        df['+DI'], df['-DI'], df['ADX'] = self.indicators.calculate_directional_indicators(
+            df['high'], df['low'], df['ATR']
+        )
+        
+        return df
+    
+    def generate_signal(self, df: pd.DataFrame) -> Optional[Signal]:
+        """Generate trading signal based on indicator conditions."""
+        current = df.iloc[-1]
+        price = current['close']
+        rsi = current['RSI']
+        adx = current['ADX']
+        ema = current['EMA_14']
+        
+        if rsi > 70 and price > ema:
+            side = "SELL"
+        elif rsi < 30 and price < ema:
+            side = "BUY"
+        else:
+            return None
+        
+        if adx > 35:
+            take_profit = round(price * 1.05 if side == "BUY" else price * 0.95, 2)
+            stop_loss = round(price * 0.98 if side == "BUY" else price * 1.02, 2)
+            
+            return Signal(
+                time=datetime.now(),
+                asset=self.asset,
+                quantity=self.quantity,
+                side=side,
+                entry=price,
+                take_profit=take_profit,
+                stop_loss=stop_loss
+            )
+        
+        return None
+
+
+def monitor(strategy: TradingStrategy, interval: int = 5) -> None:
+    """Continuously monitor the market and generate signals."""
+    while True:
+        try:
+            market_data = DataGenerator.generate_fake_data()
+            analyzed_data = strategy.calculate_indicators(market_data)
+            signal = strategy.generate_signal(analyzed_data)
+            
+            if signal:
+                print(f"\n[{signal.time}] SIGNAL: {signal.side} {signal.asset} @ {signal.entry}")
+                print(f"  TP: {signal.take_profit}, SL: {signal.stop_loss}")
+            else:
+                print(f"[{datetime.now()}] No signal detected", end='\r')
+            
+            time.sleep(interval)
+            
+        except KeyboardInterrupt:
+            print("\nMonitoring stopped by user")
+            break
+        except Exception as e:
+            print(f"\nError occurred: {str(e)}")
+            time.sleep(interval)
+
+
+if __name__ == "__main__":
+    trading_strategy = TradingStrategy("8lrCoin", quantity=1.0)
+    monitor(trading_strategy)
