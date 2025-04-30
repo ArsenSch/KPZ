@@ -1,0 +1,83 @@
+def add_order():
+    print("Виберіть тип комп'ютера:\n1 - Настільний\n2 - Ноутбук")
+    comp_type = input("Ваш вибір: ")
+    if comp_type not in ['1', '2']:
+        print("Невірний вибір")
+        return
+    
+    components = input("Введіть комплектуючі: ")
+    if not components:
+        print("A2: Не всі комплектуючі вибрані. Прецедент завершується.")
+        return
+    
+    print("Замовлення створене. Номер: 123. Друк рахунку...")
+
+def change_order():
+    if not validate_order_id():
+        return
+    
+    print("Поточна інформація замовлення показана.")
+    input("Введіть нову інформацію: ")
+    print("Зміни збережено.")
+
+def delete_order():
+    if not validate_order_id():
+        return
+    
+    confirm = input("Видалити замовлення? (так/ні): ").lower()
+    if confirm == "так":
+        print("Замовлення видалено.")
+    else:
+        print("A4: Видалення відкладено. Дані збережено.")
+
+def view_order():
+    if not validate_order_id():
+        return
+    
+    print("Показ інформації про замовлення...")
+
+def validate_order_id():
+    order_id = input("Введіть номер замовлення: ")
+    if order_id != "123":
+        print("A3: Невірний номер. Прецедент завершується.")
+        return False
+    return True
+
+def authenticate():
+    print("Вхід у систему...")
+    login = input("Логін: ")
+    password = input("Пароль: ")
+    return login == "admin" and password == "1234"
+
+def main():
+    if not authenticate():
+        print("A1: Невірні логін або пароль. Прецедент завершується.")
+        return
+    
+    menu_options = {
+        '1': add_order,
+        '2': change_order,
+        '3': delete_order,
+        '4': view_order
+    }
+    
+    while True:
+        print("\nМеню:")
+        print("1. Додати замовлення")
+        print("2. Змінити замовлення")
+        print("3. Видалити замовлення")
+        print("4. Переглянути замовлення")
+        print("5. Вийти")
+        
+        choice = input("Ваш вибір: ")
+        
+        if choice == '5':
+            print("Вихід із системи.")
+            break
+        elif choice in menu_options:
+            menu_options[choice]()
+        else:
+            print("Невірний вибір.")
+
+if __name__ == "__main__":
+    main()
