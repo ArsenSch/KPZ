@@ -1,0 +1,132 @@
+import yfinance as yf
+import pandas as pd
+import plotly.graph_objects as go
+from typing import List, Dict
+
+class Class1:
+    def __init__(self, ticker: str, start_date: str, end_date: str, range_len: int = 15):
+        self.ticker = ticker
+        self.start_date = start_date
+        self.end_date = end_date
+        self.range_len = range_len
+        self.data = self._load_data()
+        self._initialize_state()
+    def _load_data(self) -> pd.DataFrame:
+        return yf.download(self.ticker, start=self.start_date, end=self.end_date)
+    def _initialize_state(self):
+        self.short_blocks = []
+        self.long_blocks = []
+        self.bos_lines = []
+        self.last_down = self.last_down_index = self.last_low = 0
+        self.last_up = self.last_up_index = self.last_up_low = self.last_up_open = self.last_high = 0
+        self.last_long_index = self.last_short_index = 0
+    def _calculate_structure_low(self):
+        self.data['StructureLow'] = self.data['Low'].rolling(window=self.range_len).min().shift(1)
+    def _create_block(self, index: int, top: float, bottom: float, color: str) -> Dict:
+        return {
+            "left": index,
+            "top": top,
+            "bottom": bottom,
+            "right": len(self.data) - 1,
+            "color": color
+        }
+    def _update_last_candle_state(self, i: int):
+        row = self.data.iloc[i]
+        if row['Close'] < row['Open']:
+            self.last_down_index = i
+            self.last_down = row['High']
+            self.last_low = row['Low']
+        elif row['Close'] > row['Open']:
+            self.last_up_index = i
+            self.last_up = row['Close']
+            self.last_up_low = row['Low']
+            self.last_up_open = row['Open']
+            self.last_high = row['High']
+        self.last_high = max(self.last_high, row['High'])
+        self.last_low = min(self.last_low, row['Low'])
+    def _handle_order_blocks(self, i: int):
+        row = self.data.iloc[i]
+        structure_low = self.data['StructureLow'].iloc[i]
+        if row['Low'] < structure_low:
+            if i - self.last_up_index < 1000:
+                self.short_blocks.append(self._create_block(
+                    self.last_up_index, self.last_high, self.last_up_low, 'rgba(255,0,0,0.9)'
+                ))
+                self.bos_lines.append(self._create_block(i, structure_low, structure_low, 'red'))
+                self.last_short_index = self.last_up_index
+        for box in list(self.short_blocks):
+            if row['Close'] > box['top']:
+                self.short_blocks.remove(box)
+                if i - self.last_down_index < 1000 and i > self.last_long_index:
+                    self.long_blocks.append(self._create_block(
+                        self.last_down_index, self.last_down, self.last_low, 'rgba(0,255,0,0.9)'
+                    ))
+                    self.bos_lines.append(self._create_block(box['left'], box['top'], box['top'], 'green'))
+                    self.last_long_index = i
+        for box in list(self.long_blocks):
+            if row['Close'] < box['bottom']:
+                self.long_blocks.remove(box)
+    def _calculate_pdh_pdl(self):
+        self.pdh = self.data['High'].iloc[-2]
+        self.pdl = self.data['Low'].iloc[-2]
+    def process(self):
+        self._calculate_structure_low()
+        for i in range(len(self.data)):
+            self._handle_order_blocks(i)
+            self._update_last_candle_state(i)
+        self._calculate_pdh_pdl()
+    def _draw_blocks(self, fig, blocks: List[Dict]):
+        for block in blocks:
+            left = block['left']
+            right = min(block['right'], len(self.data) - 1)
+            x = [self.data.index[left], self.data.index[right]] * 2 + [self.data.index[left]]
+            y = [block['top'], block['top'], block['bottom'], block['bottom'], block['top']]
+            fig.add_trace(go.Scatter(
+                x=x, y=y, fill='toself', fillcolor=block['color'],
+                line=dict(color=block['color']), mode='lines', showlegend=False
+            ))
+    def _draw_lines(self, fig, lines: List[Dict]):
+        for line in lines:
+            left = line['left']
+            right = min(line['right'], len(self.data) - 1)
+            fig.add_trace(go.Scatter(
+                x=[self.data.index[left], self.data.index[right]],
+                y=[line['top'], line['bottom']],
+                line=dict(color=line['color']), mode='lines', showlegend=False
+            ))
+    def visualize(self):
+        fig = go.Figure()
+
+        fig.add_trace(go.Candlestick(
+            x=self.data.index,
+            open=self.data['Open'],
+            high=self.data['High'],
+            low=self.data['Low'],
+            close=self.data['Close'],
+            showlegend=False
+        ))
+        self._draw_blocks(fig, self.short_blocks)
+        self._draw_blocks(fig, self.long_blocks)
+        self._draw_lines(fig, self.bos_lines)
+        fig.add_trace(go.Scatter(
+            x=[self.data.index[0], self.data.index[-1]],
+            y=[self.pdh, self.pdh],
+            line=dict(color='blue', dash='dash'),
+            mode='lines', name='PDH'
+        ))
+        fig.add_trace(go.Scatter(
+            x=[self.data.index[0], self.data.index[-1]],
+            y=[self.pdl, self.pdl],
+            line=dict(color='orange', dash='dash'),
+            mode='lines', name='PDL'
+        ))
+
+        fig.update_layout(
+            title=f'{self.ticker} Order Blocks and BOS',
+            xaxis_title='Date', yaxis_title='Price',
+            template='plotly_dark'
+        )
+        fig.show()
+visualizer = Class1('AAPL', '2024-01-01', '2025-01-01')
+visualizer.process()
+visualizer.visualize()
